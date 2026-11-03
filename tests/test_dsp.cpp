@@ -6,6 +6,7 @@
 #include <random>
 #include <vector>
 
+#include "TinyTimeGrapher/ClockCalibrator.h"
 #include "TinyTimeGrapher/KpiCalculator.h"
 #include "TinyTimeGrapher/TickDetector.h"
 #include "TinyTimeGrapher/TimeGrapherEngine.h"
@@ -153,6 +154,40 @@ int main() {
     assertNear("engine: beat numbering", ticks.size() - 1, ticks.back().beat - ticks.front().beat, 1);
   }
 
+  // noise gate: attenuates the output between the beats only
+  {
+    std::vector<float> sig = synth(28800, 10);
+    auto run = [&](float gateDb, std::vector<float>& out) {
+      int ticks = 0;
+      TickDetector det(fs, 2000, 8000, 4.0f, [&](const Tick&) { ticks++; });
+      det.setNoiseGateDb(gateDb);
+      out.resize(sig.size());
+      det.process(sig.data(), sig.size(), out.data());
+      return ticks;
+    };
+    std::vector<float> open, gated;
+    const int ticksOpen = run(0, open);
+    const int ticksGated = run(40, gated);
+    // energy in the middle between two beats (beats at 0.5 + n * 0.125 s)
+    // and during the first 5 ms of each beat
+    double gapOpen = 0, gapGated = 0, beatOpen = 0, beatGated = 0;
+    for (int n = 8; n < 70; ++n) {
+      const size_t beat = static_cast<size_t>((0.5 + n * 0.125) * fs);
+      for (size_t i = beat + 2400; i < beat + 3600; ++i) {
+        gapOpen += open[i] * open[i];
+        gapGated += gated[i] * gated[i];
+      }
+      const size_t delay = static_cast<size_t>(0.002 * fs) + 1;  // look-ahead of the gate
+      for (size_t i = beat; i < beat + 240; ++i) {
+        beatOpen += open[i] * open[i];
+        beatGated += gated[i + delay] * gated[i + delay];
+      }
+    }
+    assertNear("gate: same detection", ticksOpen, ticksGated, 0);
+    assertNear("gate: noise attenuation dB", 40, 10 * log10(gapOpen / gapGated), 2);
+    assertNear("gate: beats pass (dB)", 0, 10 * log10(beatOpen / beatGated), 1);
+  }
+
   // demo mode: silent input is replaced by the simulated watch
   {
     TimeGrapherEngine engine;
@@ -167,6 +202,56 @@ int main() {
     Kpis k = engine.kpis();
     assertNear("demo: bph", 21600, k.nominalBph, 0);
     assertNear("demo: rate", 10.0, k.rateSPerDay, 1.0);
+  }
+
+  // clock correction: an audio clock that runs fast by 100 ppm makes the
+  // watch look 8.64 s/day slow
+  {
+    std::vector<Tick> ticks = detect(synth(28800, 20));
+    GrapherConfig cfg;
+    KpiCalculator calc;
+    const Kpis plain = calc.compute(ticks.data(), ticks.size(), cfg, kNoValue, 0.0);
+    const Kpis corrected = calc.compute(ticks.data(), ticks.size(), cfg, kNoValue, 0.0, 100.0);
+    assertNear("clock: rate correction", 8.64, corrected.rateSPerDay - plain.rateSPerDay, 0.01);
+  }
+
+  // clock calibrator: 1 h of NTP samples (+-5 ms) every 30 s, audio clock
+  // 23.5 ppm fast
+  {
+    ClockCalibrator cal;
+    uint32_t seed = 1;
+    auto noiseMs = [&seed]() {
+      seed = seed * 1664525u + 1013904223u;
+      return (static_cast<double>(seed >> 8) / (1u << 24) - 0.5) * 10.0;
+    };
+    const double e = 23.5e-6;
+    const double epoch = 1.8e9;
+    for (int i = 0; i <= 120; ++i) {
+      const double t = i * 30.0;
+      cal.addSample(epoch + t + noiseMs() / 1000.0, 1000.0 + t * (1 + e));
+      if (i == 60) {
+        // a slow answer is ignored
+        assertNear("calibrator: outlier ignored", 0,
+                   cal.addSample(epoch + t + 15.0 + 0.2, 1000.0 + (t + 15.0) * (1 + e)), 0);
+      }
+    }
+    float ppm = 0, unc = 0;
+    bool measured = false;
+    assertNear("calibrator: result", 1, cal.best(ppm, unc, &measured), 0);
+    assertNear("calibrator: measured", 1, measured, 0);
+    assertNear("calibrator: ppm", 23.5, ppm, 1.0);
+    assertNear("calibrator: uncertainty < 1 ppm", 0.5, unc, 0.5);
+    assertNear("calibrator: decimated", ClockCalibrator::kCapacity, cal.sampleCount(), ClockCalibrator::kCapacity / 2);
+    // dropped audio (the audio time jumps): after 3 samples the measurement restarts
+    for (int i = 1; i <= 3; ++i) cal.addSample(epoch + 3600 + i * 30.0, 1000.0 + 3600 + i * 30.0 - 0.5);
+    assertNear("calibrator: restart", 0, cal.sampleCount(), 0);
+
+    // a stored result is used until the measurement is better
+    ClockCalibrator restored;
+    restored.setStored(12.0f, 0.4f);
+    assertNear("calibrator: stored", 1, restored.best(ppm, unc, &measured), 0);
+    assertNear("calibrator: stored ppm", 12.0, ppm, 0);
+    assertNear("calibrator: stored is not measured", 0, measured, 0);
   }
 
   printf("%s (%d failures)\n", failures == 0 ? "OK" : "FAILED", failures);

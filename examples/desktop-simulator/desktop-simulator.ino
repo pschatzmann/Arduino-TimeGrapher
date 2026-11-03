@@ -69,6 +69,10 @@ void setup() {
 
   GrapherConfig cfg;
   engine.begin(kSampleRate, cfg);
+  gui.onShutdown = []() {
+    mic.end();
+    exit(0);
+  };
   gui.begin();
 
   const char* dir = getenv("TTG_SCREENSHOTS");

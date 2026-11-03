@@ -12,6 +12,7 @@
 #include "TinyTimeGrapher/TickDetector.h"
 #include "TinyTimeGrapher/KpiCalculator.h"
 #include "TinyTimeGrapher/HistoryBuffer.h"
+#include "TinyTimeGrapher/ClockCalibrator.h"
 #include "TinyTimeGrapher/TimeGrapherEngine.h"
 #include "TinyTimeGrapher/TimeGrapherOutput.h"
 #include "TinyTimeGrapher/WatchSimulator.h"

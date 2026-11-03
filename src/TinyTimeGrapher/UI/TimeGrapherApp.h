@@ -20,12 +20,13 @@ namespace tinytimegrapher {
  * @brief The complete Time Grapher touch GUI on top of a TimeGrapherEngine,
  * built with TinyMaterialDesign.
  *
- * - App bar with the Start / Stop button
+ * - App bar with a menu: Start / Stop and Shut down
  * - Live: KPI tiles, input level and the volume chart
  * - Graph: the timegrapher trace (tick / tock dots)
  * - Trends: rate, beat error and amplitude over time
  * - Settings: beat rate, lift angle, analysis window, filter, gain,
- *   sensitivity, calibration, theme and demo mode
+ *   sensitivity, calibration, clock correction (see setClockCalibrator()),
+ *   theme, demo mode and reset to defaults
  *
  *   TimeGrapherEngine engine;
  *   TimeGrapherApp<RGB565> gui(board, engine);
@@ -48,6 +49,11 @@ class TimeGrapherApp {
   /// Called (debounced: 2 s after the last change) when the user has
   /// changed a setting, e.g. to persist it.
   std::function<void(const GrapherConfig& config, bool dark)> onSettingsChanged;
+
+  /// Called when the user has confirmed "Shut down" in the menu, after the
+  /// measurement was stopped and pending settings were reported to
+  /// onSettingsChanged. Without a callback the menu has no "Shut down".
+  std::function<void()> onShutdown;
 
   TimeGrapherApp(tinygpu::LCDBoard& board, TimeGrapherEngine& engine)
       : engine_(engine),
@@ -78,6 +84,7 @@ class TimeGrapherApp {
     buildGraph();
     buildTrends();
     buildSettings();
+    built_ = true;
     showPage(kLive);
   }
 
@@ -119,10 +126,23 @@ class TimeGrapherApp {
 
   tinymd::App<RGB_T>& app() { return app_; }
 
+  /// Shows the state of the clock correction (e.g. by NTPClockSync) in the
+  /// Settings.
+  void setClockCalibrator(const ClockCalibrator& calibrator) {
+    clock_ = &calibrator;
+    if (built_) {
+      refreshClock();
+      layoutSettings();
+    }
+  }
+
  private:
   static constexpr int32_t kBarHeight = 40;
   static constexpr int32_t kNavHeight = 56;
   static constexpr int32_t kMargin = 8;
+  /// Right margin of the scrolling pages: keeps the controls out of the
+  /// touch zone of the scrollbar.
+  static constexpr int32_t kRightMargin = tinymd::Container<RGB_T>::kScrollbarTouchWidth;
   static constexpr const char* kDemoNote =
       "Measures a simulated watch instead of the microphone - to try the timegrapher without a watch.";
 
@@ -135,7 +155,13 @@ class TimeGrapherApp {
 
   // frame
   tinymd::AppBar<RGB_T> appBar_;
-  tinymd::Button<RGB_T> startButton_;
+  tinymd::IconButton<RGB_T> menuButton_;
+  tinymd::Menu<RGB_T> menu_;
+  tinymd::ListItem<RGB_T> startItem_;
+  tinymd::ListItem<RGB_T> shutdownItem_;
+  tinymd::Dialog<RGB_T> shutdownDialog_;
+  tinymd::Button<RGB_T> shutdownCancel_;
+  tinymd::Button<RGB_T> shutdownConfirm_;
   tinymd::NavigationBar<RGB_T> nav_;
   tinymd::Container<RGB_T> pages_[kPageCount];
 
@@ -166,12 +192,20 @@ class TimeGrapherApp {
   int monitorThreshold_ = 0;
   ValueSlider<RGB_T> cal_;
   TextBlock<RGB_T> calNote_;
+  TextBlock<RGB_T> clockNote_;
+  const ClockCalibrator* clock_ = nullptr;
+  std::string clockText_;
   SwitchRow<RGB_T> dark_;
   SwitchRow<RGB_T> demo_;
   TextBlock<RGB_T> demoNote_;
+  tinymd::Button<RGB_T> defaultsButton_;
+  tinymd::Dialog<RGB_T> defaultsDialog_;
+  tinymd::Button<RGB_T> defaultsCancel_;
+  tinymd::Button<RGB_T> defaultsConfirm_;
   std::vector<std::string> bphLabels_;
 
   int page_ = kLive;
+  bool built_ = false;
   bool forceRefresh_ = true;
   bool settingsChanged_ = false;
   uint32_t settingsChangedMs_ = 0;
@@ -194,17 +228,11 @@ class TimeGrapherApp {
   void buildFrame() {
     const int32_t w = width();
     appBar_ = tinymd::AppBar<RGB_T>(tinymd::Bounds(0, 0, w, kBarHeight), "Time Grapher");
-    startButton_ = tinymd::Button<RGB_T>(tinymd::Bounds(w - 78, 6, 72, 28), "Start");
-    startButton_.onClick = [this]() {
-      if (engine_.isRunning()) {
-        engine_.stop();
-      } else {
-        engine_.start();
-      }
-      forceRefresh_ = true;
-    };
-    appBar_.trailing = &startButton_;
+    menuButton_ = tinymd::IconButton<RGB_T>(appBar_.trailingRect(), tinymd::drawMenu<RGB_T>);
+    menuButton_.onClick = [this]() { openMenu(); };
+    appBar_.trailing = &menuButton_;
     app_.screen().addFixedWidget(appBar_);
+    buildMenu();
 
     nav_ = tinymd::NavigationBar<RGB_T>(
         tinymd::Bounds(0, static_cast<int32_t>(app_.height()) - kNavHeight, w, kNavHeight));
@@ -223,14 +251,72 @@ class TimeGrapherApp {
     }
   }
 
+  void buildMenu() {
+    constexpr int32_t menuW = 150;
+    constexpr int32_t itemH = 48;
+    menu_ = tinymd::Menu<RGB_T>(tinymd::Bounds(width() - menuW - 4, kBarHeight, menuW, 2 * itemH));
+    startItem_ = tinymd::ListItem<RGB_T>(menu_.itemRect(0, itemH), "Start", drawPlayIcon<RGB_T>);
+    startItem_.onClick = [this]() {
+      app_.screen().dismissDialog();
+      if (engine_.isRunning()) {
+        engine_.stop();
+      } else {
+        engine_.start();
+      }
+      forceRefresh_ = true;
+    };
+    menu_.addItem(startItem_);
+    shutdownItem_ = tinymd::ListItem<RGB_T>(menu_.itemRect(1, itemH), "Shut down", drawPowerIcon<RGB_T>);
+    shutdownItem_.onClick = [this]() {
+      app_.screen().dismissDialog();
+      app_.screen().presentDialog(shutdownDialog_);
+    };
+    menu_.addItem(shutdownItem_);
+    menu_.onOutsideTap = [this]() { app_.screen().dismissDialog(); };
+
+    const int32_t dialogH = 150;
+    shutdownDialog_ = tinymd::Dialog<RGB_T>(
+        tinymd::Bounds(16, (static_cast<int32_t>(app_.height()) - dialogH) / 2, width() - 32, dialogH),
+        "Shut down?", "The measurement is stopped and the device is switched off.");
+    shutdownCancel_ = tinymd::Button<RGB_T>(shutdownDialog_.actionRect(0, 2), "Cancel", tinymd::ButtonVariant::kText);
+    shutdownCancel_.onClick = [this]() { app_.screen().dismissDialog(); };
+    shutdownConfirm_ = tinymd::Button<RGB_T>(shutdownDialog_.actionRect(1, 2), "Shut down");
+    shutdownConfirm_.onClick = [this]() {
+      app_.screen().dismissDialog();
+      shutdown();
+    };
+    shutdownDialog_.addAction(shutdownCancel_);
+    shutdownDialog_.addAction(shutdownConfirm_);
+  }
+
+  /// Opens the menu with the items for the current state.
+  void openMenu() {
+    const bool running = engine_.isRunning();
+    startItem_.setTitle(running ? "Stop" : "Start");
+    startItem_.setIcon(running ? drawStopIcon<RGB_T> : drawPlayIcon<RGB_T>);
+    shutdownItem_.visible = static_cast<bool>(onShutdown);
+    const int items = shutdownItem_.visible ? 2 : 1;
+    menu_.bounds.h = items * startItem_.bounds.h;
+    app_.screen().presentDialog(menu_);
+  }
+
+  void shutdown() {
+    engine_.stop();
+    if (settingsChanged_) {
+      settingsChanged_ = false;
+      if (onSettingsChanged) onSettingsChanged(cfg_, dark_.value());
+    }
+    if (onShutdown) onShutdown();
+  }
+
   void buildLive() {
     tinymd::Container<RGB_T>& page = pages_[kLive];
     const int32_t w = width();
     int32_t y = pageTop() + 6;
-    status_ = tinymd::Label<RGB_T>(tinymd::Bounds(kMargin, y, w - 2 * kMargin, 12), "");
+    status_ = tinymd::Label<RGB_T>(tinymd::Bounds(kMargin, y, w - kMargin - kRightMargin, 12), "");
     page.addChild(status_);
     y += 16;
-    levelBar_ = tinymd::LinearProgressIndicator<RGB_T>(tinymd::Bounds(kMargin, y, w - 2 * kMargin, 4));
+    levelBar_ = tinymd::LinearProgressIndicator<RGB_T>(tinymd::Bounds(kMargin, y, w - kMargin - kRightMargin, 4));
     page.addChild(levelBar_);
     y += 10;
 
@@ -238,7 +324,7 @@ class TimeGrapherApp {
                                             "JITTER", "SNR",      "GAIN",      "WINDOW"};
     constexpr int32_t gap = 6;
     constexpr int32_t tileH = 46;
-    const int32_t tileW = (w - 2 * kMargin - 2 * gap) / 3;
+    const int32_t tileW = (w - kMargin - kRightMargin - 2 * gap) / 3;
     for (int i = 0; i < 9; ++i) {
       const int32_t x = kMargin + (i % 3) * (tileW + gap);
       tiles_[i] = StatTile<RGB_T>(tinymd::Bounds(x, y + (i / 3) * (tileH + gap), tileW, tileH), captions[i]);
@@ -246,7 +332,7 @@ class TimeGrapherApp {
     }
     y += 3 * tileH + 2 * gap + 8;
 
-    initVolumeChart(volume_, volumeThreshold_, tinymd::Bounds(kMargin, y, w - 2 * kMargin, 120), "Volume (dB)");
+    initVolumeChart(volume_, volumeThreshold_, tinymd::Bounds(kMargin, y, w - kMargin - kRightMargin, 120), "Volume (dB)");
     volume_.setFooter("Peaks above the threshold are ticks");
     page.addChild(volume_);
   }
@@ -271,7 +357,7 @@ class TimeGrapherApp {
     tinymd::Container<RGB_T>& page = pages_[kTrends];
     const int32_t w = width();
     int32_t y = pageTop() + 6;
-    trendWindow_ = tinymd::SegmentedButton<RGB_T>(tinymd::Bounds(kMargin, y, w - 2 * kMargin, 28));
+    trendWindow_ = tinymd::SegmentedButton<RGB_T>(tinymd::Bounds(kMargin, y, w - kMargin - kRightMargin, 28));
     trendWindow_.addSegment("1 min");
     trendWindow_.addSegment("5 min");
     trendWindow_.addSegment("30 min");
@@ -289,13 +375,13 @@ class TimeGrapherApp {
     static const char* const titles[3] = {"Rate (s/day)", "Beat error (ms)", "Amplitude (deg)"};
     const RGB_T colors[3] = {accents_.cyan, accents_.amber, accents_.emerald};
     for (int i = 0; i < 3; ++i) {
-      trends_[i] = tinymd::LineChart<RGB_T>(tinymd::Bounds(kMargin, y, w - 2 * kMargin, 130), titles[i]);
+      trends_[i] = tinymd::LineChart<RGB_T>(tinymd::Bounds(kMargin, y, w - kMargin - kRightMargin, 130), titles[i]);
       trends_[i].addSeries(colors[i]);
       page.addChild(trends_[i]);
       y += 138;
     }
     resetButton_ =
-        tinymd::Button<RGB_T>(tinymd::Bounds(kMargin, y, w - 2 * kMargin, 32), "Reset session",
+        tinymd::Button<RGB_T>(tinymd::Bounds(kMargin, y, w - kMargin - kRightMargin, 32), "Reset session",
                               tinymd::ButtonVariant::kOutlined);
     resetButton_.onClick = [this]() {
       engine_.resetSession();
@@ -343,7 +429,7 @@ class TimeGrapherApp {
                                  "Lower sensitivity detects quieter ticks but picks up more noise.");
     page.addChild(sensNote_);
 
-    initVolumeChart(monitor_, monitorThreshold_, tinymd::Bounds(0, 0, w - 2 * kMargin, 110), "Input level (dB)");
+    initVolumeChart(monitor_, monitorThreshold_, tinymd::Bounds(0, 0, w - kMargin - kRightMargin, 110), "Input level (dB)");
     page.addChild(monitor_);
 
     addSlider(page, cal_, cfg_.calibrationSPerDay, [this](float v) { cfg_.calibrationSPerDay = v; });
@@ -351,6 +437,8 @@ class TimeGrapherApp {
                                 "Added to the measured rate to compensate the clock of the audio "
                                 "codec. Calibrate against a reference watch.");
     page.addChild(calNote_);
+    clockNote_ = TextBlock<RGB_T>(tinymd::Bounds(), "");
+    page.addChild(clockNote_);
 
     dark_.onChange = [this](bool v) {
       app_.screen().setTheme(v ? darkTheme_ : lightTheme_);
@@ -366,6 +454,48 @@ class TimeGrapherApp {
     page.addChild(demo_);
     demoNote_ = TextBlock<RGB_T>(tinymd::Bounds(), kDemoNote);
     page.addChild(demoNote_);
+
+    // reset to defaults, after a confirmation
+    defaultsButton_ = tinymd::Button<RGB_T>(tinymd::Bounds(), "Reset to defaults", tinymd::ButtonVariant::kOutlined);
+    defaultsButton_.onClick = [this]() { app_.screen().presentDialog(defaultsDialog_); };
+    page.addChild(defaultsButton_);
+    const int32_t dialogH = 150;
+    defaultsDialog_ = tinymd::Dialog<RGB_T>(
+        tinymd::Bounds(16, (static_cast<int32_t>(app_.height()) - dialogH) / 2, w - 32, dialogH),
+        "Reset settings?", "All settings are set back to their default values.");
+    defaultsCancel_ = tinymd::Button<RGB_T>(defaultsDialog_.actionRect(0, 2), "Cancel", tinymd::ButtonVariant::kText);
+    defaultsCancel_.onClick = [this]() { app_.screen().dismissDialog(); };
+    defaultsConfirm_ = tinymd::Button<RGB_T>(defaultsDialog_.actionRect(1, 2), "Reset");
+    defaultsConfirm_.onClick = [this]() {
+      app_.screen().dismissDialog();
+      resetToDefaults();
+    };
+    defaultsDialog_.addAction(defaultsCancel_);
+    defaultsDialog_.addAction(defaultsConfirm_);
+    layoutSettings();
+  }
+
+  /// Sets all settings (including the theme) back to their defaults.
+  void resetToDefaults() {
+    cfg_ = GrapherConfig();
+    setDark(true);
+    syncSettings();
+    configChanged();
+  }
+
+  /// Updates the settings widgets from cfg_.
+  void syncSettings() {
+    updateBphChips();
+    lift_.setValue(cfg_.liftAngleDeg);
+    windowSec_.setValue(cfg_.windowSec);
+    low_.setValue(cfg_.lowHz);
+    high_.setValue(cfg_.highHz);
+    agc_.setValue(cfg_.agc);
+    gain_.setValue(cfg_.gainDb);
+    gain_.enabled = !cfg_.agc;
+    sens_.setValue(cfg_.sensitivity);
+    cal_.setValue(cfg_.calibrationSPerDay);
+    demo_.setValue(cfg_.demo);
     layoutSettings();
   }
 
@@ -382,7 +512,7 @@ class TimeGrapherApp {
   /// Positions the settings rows from top to bottom, skipping hidden ones.
   void layoutSettings() {
     const int32_t w = width();
-    const int32_t inner = w - 2 * kMargin;
+    const int32_t inner = w - kMargin - kRightMargin;
     int32_t y = pageTop() + 6;
     auto place = [&](tinymd::Widget<RGB_T>& widget, int32_t h, bool show = true) {
       widget.visible = show;
@@ -419,9 +549,11 @@ class TimeGrapherApp {
     placeNote(calNote_,
               "Added to the measured rate to compensate the clock of the audio codec. Calibrate against a "
               "reference watch.");
+    placeNote(clockNote_, clockText_.c_str(), clock_ != nullptr);
     place(dark_, SwitchRow<RGB_T>::kHeight);
     place(demo_, SwitchRow<RGB_T>::kHeight);
     placeNote(demoNote_, kDemoNote);
+    place(defaultsButton_, 32);
     app_.screen().invalidate();
   }
 
@@ -443,8 +575,6 @@ class TimeGrapherApp {
 
   void refresh() {
     const bool running = engine_.isRunning();
-    startButton_.setLabel(running ? "Stop" : "Start");
-    startButton_.setVariant(running ? tinymd::ButtonVariant::kTonal : tinymd::ButtonVariant::kFilled);
     switch (page_) {
       case kLive:
         refreshLive(running);
@@ -457,6 +587,7 @@ class TimeGrapherApp {
         break;
       case kSettings:
         refreshVolume(monitor_, monitorThreshold_);
+        refreshClock();
         break;
     }
   }
@@ -470,11 +601,13 @@ class TimeGrapherApp {
       snprintf(buf, sizeof(buf), "%s  %02d:%02d", k.locked() ? "Measuring" : "Listening for ticks", sec / 60,
                sec % 60);
     } else {
-      snprintf(buf, sizeof(buf), "%s", k.locked() ? "Stopped" : "Stopped - press Start");
+      snprintf(buf, sizeof(buf), "%s", k.locked() ? "Stopped" : "Stopped - start in the menu");
     }
     status_.setText(buf);
     status_.setColor(running ? accents_.emerald : app_.theme().colors.onSurfaceVariant);
-    const double level = engine_.level() * 20;
+    // the input is analyzed all the time (see the monitor in the Settings),
+    // but the Live page only shows it during a measurement
+    const double level = running ? engine_.level() * 20 : 0.0;
     levelBar_.setValue(static_cast<float>(level > 1 ? 1 : level));
 
     setTile(0, formatValue(v, sizeof(v), k.rateSPerDay, 1), "s/day",
@@ -497,7 +630,13 @@ class TimeGrapherApp {
     snprintf(v, sizeof(v), "%d", cfg_.windowSec);
     setTile(8, v, "s", accents_.blue);
 
-    refreshVolume(volume_, volumeThreshold_);
+    if (running) {
+      refreshVolume(volume_, volumeThreshold_);
+    } else {
+      levels_.clear();
+      volume_.setValues(0, levels_);
+      volume_.setReferenceLine(volumeThreshold_, -80.0f);
+    }
   }
 
   void setTile(int index, const char* value, const char* sub, RGB_T accent) {
@@ -516,6 +655,38 @@ class TimeGrapherApp {
     for (float& l : levels_) l = toDb(l);
     chart.setValues(0, levels_);
     chart.setReferenceLine(thresholdLine, toDb(threshold));
+  }
+
+  /// Updates the state of the clock correction in the Settings.
+  void refreshClock() {
+    if (clock_ == nullptr) return;
+    char buf[160];
+    int len = 0;
+    float ppm, uncertainty;
+    bool measured = false;
+    if (clock_->best(ppm, uncertainty, &measured)) {
+      len = snprintf(buf, sizeof(buf), "Clock correction (NTP): %+.1f ppm = %+.2f s/day (+-%.2f)%s", ppm,
+                     ppm * 0.0864f, uncertainty * 0.0864f, measured ? "" : ", stored");
+    } else {
+      len = snprintf(buf, sizeof(buf), "Clock correction (NTP): none yet");
+    }
+    if (!measured) {
+      const float minutes = clock_->spanSec() / 60.0f;
+      const float current = clock_->uncertaintyPpm();
+      if (isfinite(current)) {
+        snprintf(buf + len, sizeof(buf) - len, ". Measuring for %.0f min: +-%.1f ppm", minutes, current);
+      } else {
+        snprintf(buf + len, sizeof(buf) - len, ". Waiting for the time server");
+      }
+    }
+    if (clockText_ == buf) return;
+    tinygpu::IFont<RGB_T>& font = *app_.theme().typography.label;
+    const int32_t inner = width() - kMargin - kRightMargin;
+    const bool relayout = TextBlock<RGB_T>::heightFor(clockText_.c_str(), inner, font) !=
+                          TextBlock<RGB_T>::heightFor(buf, inner, font);
+    clockText_ = buf;
+    clockNote_.setText(buf);
+    if (relayout) layoutSettings();
   }
 
   static float toDb(float v) {

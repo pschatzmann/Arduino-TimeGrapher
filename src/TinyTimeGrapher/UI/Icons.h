@@ -53,4 +53,41 @@ void drawTuneIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RGB
   }
 }
 
+/// Triangle pointing right (Start).
+template <typename RGB_T>
+void drawPlayIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RGB_T color,
+                  uint8_t thickness = 2) {
+  (void)thickness;
+  using tinymd::toPx;
+  const tinymd::Bounds in = r.inset(r.w / 8);
+  // one row per pixel: the width grows to the middle and shrinks again
+  const int32_t half = in.h / 2;
+  for (int32_t dy = 0; dy <= in.h; ++dy) {
+    const int32_t len = (half - (dy > half ? dy - half : half - dy)) * in.w / (half > 0 ? half : 1);
+    if (len > 0) target.fillRect(toPx(in.x), toPx(in.y + dy), toPx(len), 1, color);
+  }
+}
+
+/// Filled square (Stop).
+template <typename RGB_T>
+void drawStopIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RGB_T color,
+                  uint8_t thickness = 2) {
+  (void)thickness;
+  using tinymd::toPx;
+  const tinymd::Bounds in = r.inset(r.w / 8);
+  target.fillRect(toPx(in.x), toPx(in.y), toPx(in.w), toPx(in.h), color);
+}
+
+/// Open circle with a vertical bar (Shut down).
+template <typename RGB_T>
+void drawPowerIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RGB_T color,
+                   uint8_t thickness = 2) {
+  using tinymd::toPx;
+  const int32_t radius = r.w * 3 / 8;
+  const int32_t cx = r.centerX();
+  const int32_t cy = r.centerY() + 1;
+  target.drawArc(toPx(cx), toPx(cy), toPx(radius), 300.0f, 600.0f, color, thickness);
+  tinymd::drawLineThick(target, cx, cy - radius - 1, cx, cy - 1, color, thickness);
+}
+
 }  // namespace tinytimegrapher

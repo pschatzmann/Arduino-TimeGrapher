@@ -41,8 +41,10 @@ class KpiCalculator {
     return work_[work_.size() / 2];
   }
 
-  /// KPIs from the `n` ticks (oldest first).
-  Kpis compute(const Tick* ticks, size_t n, const GrapherConfig& config, double snrDb, double level) {
+  /// KPIs from the `n` ticks (oldest first). clockPpm is the error of the
+  /// clock the tick times were measured with (positive: runs fast).
+  Kpis compute(const Tick* ticks, size_t n, const GrapherConfig& config, double snrDb, double level,
+               double clockPpm = 0.0) {
     Kpis k;
     k.snrDb = snrDb;
     k.level = level;
@@ -76,9 +78,11 @@ class KpiCalculator {
     const double slope = sxy / sxx;
     const double intercept = my - slope * mx;
 
-    k.measuredBph = 3600.0 / slope;
+    // a clock that runs fast makes the beats look too long
+    const double clock = 1.0 + clockPpm * 1e-6;
+    k.measuredBph = 3600.0 * clock / slope;
     k.nominalBph = bph;
-    k.rateSPerDay = (nominal / slope - 1.0) * 86400.0 + config.calibrationSPerDay;
+    k.rateSPerDay = (nominal * clock / slope - 1.0) * 86400.0 + config.calibrationSPerDay;
 
     // residuals split by parity
     double sumE = 0, sumO = 0;

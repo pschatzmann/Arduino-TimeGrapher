@@ -54,9 +54,15 @@ struct GrapherConfig {
   /// 0 = auto-detect from the tick interval.
   int bph = 0;
   float liftAngleDeg = 52.0f;
-  int windowSec = 10;
-  int lowHz = 2000;
+  /// Seconds of beats used for the KPIs; longer is more precise with weak
+  /// signals, shorter reacts faster to changes.
+  int windowSec = 20;
+  /// Band-pass of the detector: on the ESP32-S3 Hosyond board the ticks of
+  /// a 21600 bph watch were at 4-8 kHz, below that there is only noise.
+  int lowHz = 4000;
   int highHz = 8000;
+  /// Detection threshold as a multiple of the noise floor: lower detects
+  /// quieter ticks but picks up more noise.
   float sensitivity = 4.0f;
   /// Automatic gain control; when off, gainDb is applied as a fixed
   /// amplification.

@@ -97,6 +97,7 @@ class TimeGrapherEngine {
     if (sampleRate_ <= 0) return;
     resetSessionLocked();
     createDetector();
+    volume_.clear();  // the trace of the session starts empty
     running_ = true;
     revision_++;
   }
@@ -226,6 +227,25 @@ class TimeGrapherEngine {
     return revision_;
   }
 
+  /// Seconds of audio received since begin(), measured with the audio
+  /// clock (see ClockCalibrator).
+  double audioTimeSec() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sampleRate_ > 0 ? static_cast<double>(samples_) / sampleRate_ : 0.0;
+  }
+
+  /// Error of the audio clock in ppm (positive: runs fast), e.g. measured
+  /// with a ClockCalibrator. The rate is corrected with it, except in the
+  /// demo mode.
+  void setClockCorrectionPpm(double ppm) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    clockPpm_ = ppm;
+  }
+  double clockCorrectionPpm() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return clockPpm_;
+  }
+
   /// Seconds of audio measured in the current session.
   double sessionSec() const {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -249,6 +269,7 @@ class TimeGrapherEngine {
   std::vector<Tick> window_;
   float threshold_ = 0.0f;
   uint32_t revision_ = 0;
+  double clockPpm_ = 0.0;
 
   int64_t samples_ = 0;
   int64_t sessionStart_ = 0;
@@ -358,7 +379,9 @@ class TimeGrapherEngine {
       if (ticks_[i].timeSec >= sec - config_.windowSec) window_.push_back(ticks_[i]);
     }
     const double snr = ticks_.empty() ? kNoValue : detector_->snrDb(ticks_.back().peak);
-    kpis_ = calculator_.compute(window_.data(), window_.size(), config_, snr, detector_->level());
+    // the simulated watch is not measured with the audio clock
+    kpis_ = calculator_.compute(window_.data(), window_.size(), config_, snr, detector_->level(),
+                                config_.demo ? 0.0 : clockPpm_);
     KpiPoint p;
     p.timeSec = static_cast<float>(sec);
     p.rateSPerDay = static_cast<float>(kpis_.rateSPerDay);

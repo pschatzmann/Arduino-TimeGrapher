@@ -16,6 +16,9 @@ namespace tinytimegrapher {
  * phase in the row, so a steady watch gives two vertical dotted lines (tick,
  * tock); a slope shows the rate error and a shifted tock line shows beat
  * error. The newest tick is at the bottom, anchored at 25 % of the width.
+ *
+ * Scales: the time in seconds before the newest row on the left, the offset
+ * in milliseconds from the tick line below the plot.
  */
 template <typename RGB_T = TINYMD_DEFAULT_RGB_T>
 class TimegrapherChart : public tinymd::Widget<RGB_T> {
@@ -59,15 +62,40 @@ class TimegrapherChart : public tinymd::Widget<RGB_T> {
     drawText(target, small, b.right() - 8 - static_cast<int32_t>(small.measureTextWidth(buf)), legendY, buf,
              t.colors.onSurfaceVariant, t.colors.surface);
 
-    const tinymd::Bounds plot(b.x + 6, b.y + 30, b.w - 12, legendY - 4 - (b.y + 30));
+    // room for the scales: seconds on the left, milliseconds below
+    const int32_t textH = static_cast<int32_t>(small.getHeight(1));
+    const int32_t axisW = static_cast<int32_t>(small.measureTextWidth("-00s")) + 4;
+    const int32_t plotY = b.y + 30;
+    const tinymd::Bounds plot(b.x + 6 + axisW, plotY, b.w - 12 - axisW - 6, legendY - 6 - textH - plotY);
     if (plot.w < 8 || plot.h < 8) return;
+    const double rowLen = 2 * 3600.0 / (bph_ > 0 ? bph_ : 28800);
     const RGB_T grid = t.colors.outline;
-    target.fillRect(toPx(plot.x + plot.w / 4), toPx(plot.y), 1, toPx(plot.h), grid);
-    target.fillRect(toPx(plot.x + plot.w * 3 / 4), toPx(plot.y), 1, toPx(plot.h), grid);
     const RGB_T faint = tinymd::blend(t.colors.surface, grid, 0.5f);
+    const RGB_T label = t.colors.onSurfaceVariant;
+
+    for (int i = 0; i <= 4; ++i) {
+      const int32_t x = plot.x + (plot.w - 1) * i / 4;
+      target.fillRect(toPx(x), toPx(plot.y), 1, toPx(plot.h), i % 2 == 1 ? grid : faint);
+      if (i == 1) {
+        snprintf(buf, sizeof(buf), "0");
+      } else {
+        snprintf(buf, sizeof(buf), i == 4 ? "%+.0fms" : "%+.0f", (i - 1) * rowLen * 250.0);
+      }
+      const int32_t w = static_cast<int32_t>(small.measureTextWidth(buf));
+      int32_t tx = x - w / 2;
+      if (tx + w > b.right() - 4) tx = b.right() - 4 - w;
+      drawText(target, small, tx, plot.bottom() + 3, buf, label, t.colors.surface);
+    }
     for (int i = 0; i <= 4; ++i) {
       const int32_t y = plot.y + (plot.h - 1) * i / 4;
       target.fillRect(toPx(plot.x), toPx(y), toPx(plot.w), 1, faint);
+      const double ago = rows * rowLen * (4 - i) / 4;
+      snprintf(buf, sizeof(buf), "%s%.0fs", ago > 0 ? "-" : "", ago);
+      int32_t ty = y - textH / 2;
+      if (ty < plot.y) ty = plot.y;
+      if (ty + textH > plot.bottom()) ty = plot.bottom() - textH;
+      drawText(target, small, plot.x - 4 - static_cast<int32_t>(small.measureTextWidth(buf)), ty, buf, label,
+               t.colors.surface);
     }
 
     // anchor on the newest tick (even beat) so tick and tock keep their side
@@ -85,7 +113,6 @@ class TimegrapherChart : public tinymd::Widget<RGB_T> {
                plot.centerY() - 4, msg, t.colors.onSurfaceVariant, t.colors.surface);
       return;
     }
-    const double rowLen = 2 * 3600.0 / (bph_ > 0 ? bph_ : 28800);
     const int32_t radius = plot.h / rows >= 5 ? 2 : 1;
     for (const Tick& tick : ticks_) {
       const double u = (tick.timeSec - newest->timeSec) / rowLen;
