@@ -19,8 +19,6 @@
 
 #include "TinyTimeGrapher/UI/Theme.h"
 #include "TinyTimeGrapher/UI/Icons.h"
-#include "TinyTimeGrapher/UI/StatTile.h"
-#include "TinyTimeGrapher/UI/SettingRows.h"
 #include "TinyTimeGrapher/UI/TimegrapherChart.h"
 #include "TinyTimeGrapher/UI/TimeGrapherApp.h"
 
