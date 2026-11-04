@@ -1,4 +1,4 @@
-# TinyTimeGrapher
+# TimeGrapher
 
 A header-only Arduino library that turns a microcontroller with a microphone and a touch display into a timegrapher for mechanical watches and clocks. It listens to the ticks, shows the key figures live and charts them over time.
 
