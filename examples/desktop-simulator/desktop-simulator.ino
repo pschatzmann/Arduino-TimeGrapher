@@ -3,12 +3,14 @@
  * @brief The Time Grapher GUI in a desktop SDL2 window (mouse = touch),
  * measuring the default microphone of the computer via audio-tools'
  * MiniAudioStream. "Demo mode" in the Settings measures a simulated watch
- * instead.
+ * instead. "WiFi" in the menu shows the WiFi page with simulated networks
+ * (password "demo").
  *
  * With the environment variable TTG_SCREENSHOTS set to a directory, no audio
  * device is opened: 90 s of a simulated watch (21600 bph, +12 s/day, 0.8 ms
  * beat error) are processed at once and every page is saved there as a BMP
- * image (TinyMaterialDesign's App::saveScreenshot()).
+ * image (TinyMaterialDesign's App::saveScreenshot()). tools/screenshots.py
+ * compares them with docs/ or updates docs/ with them.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +27,7 @@ TimeGrapherEngine engine;
 TimeGrapherOutput grapherOut(engine);  // feeds the engine
 StreamCopy copier(grapherOut, mic);
 TimeGrapherApp<RGB565> gui(DefaultBoard, engine);
+SimulatedWifi wifi;  // simulated networks for the WiFi page
 
 void savePage(const char* dir, const char* name) {
   // let the GUI pick up the data of the page
@@ -57,6 +60,9 @@ void screenshots(const char* dir) {
     gui.showPage(page);
     savePage(dir, names[page]);
   }
+  gui.showWifi();
+  delay(900);  // the simulated scan
+  savePage(dir, "wifi");
   gui.setDark(false);
   gui.showPage(0);
   savePage(dir, "live-light");
@@ -73,6 +79,7 @@ void setup() {
     mic.end();
     exit(0);
   };
+  gui.setWifi(wifi);
   gui.begin();
 
   const char* dir = getenv("TTG_SCREENSHOTS");

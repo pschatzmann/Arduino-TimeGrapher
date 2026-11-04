@@ -11,9 +11,11 @@
  * - The settings are stored in the flash (Preferences).
  * - "Demo mode" in the Settings measures a simulated watch instead of the
  *   microphone.
- * - With WiFi (kWifiSsid), the audio clock is compared with an NTP server
- *   (TinyNTP) to correct the measured rate; the result is stored in the
- *   flash. After about one hour it is precise to 1 ppm (0.09 s/day).
+ * - WiFi (optional): select a network and enter the password with "WiFi" in
+ *   the menu; the credentials are stored in the flash. While connected, the
+ *   audio clock is compared with an NTP server (TinyNTP) to correct the
+ *   measured rate; the result is stored in the flash. After about one hour
+ *   it is precise to 1 ppm (0.09 s/day).
  * - "Shut down" in the menu switches off the display and puts the ESP32 into
  *   deep sleep; press the reset button to start again.
  *
@@ -21,7 +23,8 @@
  * arduino-audio-tools, arduino-audio-driver and TinyNTP.
  *
  * Arduino IDE: board "ESP32S3 Dev Module", PSRAM "OPI PSRAM",
- * Flash Size "16MB".
+ * Flash Size "16MB", Partition Scheme "16M Flash (3MB APP/9.9MB FATFS)" (the
+ * sketch does not fit into the 1.2 MB of the default partition scheme).
  */
 #include <Preferences.h>
 #include <WiFi.h>
@@ -35,11 +38,8 @@
 #include "AudioBoards/ESP32S3HosyondDisplay.h"  // arduino-audio-driver
 #include "TinyNTP.h"
 #include "TinyTimeGrapher.h"
+#include "TinyMaterialDesign/Wifi/WifiEsp32.h"
 #include "TinyTimeGrapher/NTPClockSync.h"
-
-// WiFi for the clock correction with NTP: leave empty to switch it off
-const char* kWifiSsid = "";
-const char* kWifiPassword = "";
 
 const int kSampleRate = 48000;
 const int kChannels = 1;  // the ES8311 has one microphone (I2S left slot)
@@ -51,6 +51,7 @@ TimeGrapherEngine engine;
 TimeGrapherOutput grapherOut(engine);  // feeds the engine
 StreamCopy copier(grapherOut, codec, kFrames * kChannels * sizeof(int16_t));
 TimeGrapherApp<RGB565> gui(board, engine);
+Esp32Wifi wifi;  // WiFi page in the menu: scan, login, stored credentials
 audio_tools::Task audioTask("audio", 8192, 10, 0);
 Preferences prefs;
 ClockCalibrator clockCalibrator;
@@ -156,6 +157,8 @@ void setup() {
   // display + touch first: the touch controller and the codec share the I2C bus
   gui.onSettingsChanged = saveConfig;
   gui.onShutdown = shutdown;
+  wifi.begin();       // connects with the stored credentials (if any)
+  gui.setWifi(wifi);  // "WiFi" in the menu
   gui.begin(dark);
 
   auto audioCfg = codec.defaultConfig(RX_MODE);
@@ -173,10 +176,7 @@ void setup() {
 
   loadClock();
   gui.setClockCalibrator(clockCalibrator);
-  if (kWifiSsid[0] != 0) {
-    WiFi.begin(kWifiSsid, kWifiPassword);
-    ntpTask.begin(ntpLoop);
-  }
+  ntpTask.begin(ntpLoop);  // waits until the WiFi is connected
 }
 
 void loop() { gui.update(); }

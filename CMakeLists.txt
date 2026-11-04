@@ -17,10 +17,12 @@ set(FETCHCONTENT_QUIET OFF)
 set(TMD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(TMD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(TGPU_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+# Pinned: the GUI needs tinymd::Page, PageNavigator and WifiLoginPage, which
+# are newer than the TinyMaterialDesign release v0.3.0.
 FetchContent_Declare(
   tinymaterialdesign
   GIT_REPOSITORY https://github.com/pschatzmann/TinyMaterialDesign.git
-  GIT_TAG        main
+  GIT_TAG        37afd4ad2c050b8e21024c2a5e04dbe28467582c
 )
 FetchContent_MakeAvailable(tinymaterialdesign)
 

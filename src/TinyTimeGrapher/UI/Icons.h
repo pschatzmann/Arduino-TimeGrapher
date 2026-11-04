@@ -1,4 +1,6 @@
 #pragma once
+#include <math.h>
+
 #include "TinyMaterialDesign.h"
 
 namespace tinytimegrapher {
@@ -88,6 +90,33 @@ void drawPowerIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RG
   const int32_t cy = r.centerY() + 1;
   target.drawArc(toPx(cx), toPx(cy), toPx(radius), 300.0f, 600.0f, color, thickness);
   tinymd::drawLineThick(target, cx, cy - radius - 1, cx, cy - 1, color, thickness);
+}
+
+/// Two circular arrows (Reset session).
+template <typename RGB_T>
+void drawResetIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RGB_T color,
+                   uint8_t thickness = 2) {
+  using tinymd::toPx;
+  const int32_t radius = r.w * 3 / 8;
+  const int32_t cx = r.centerX(), cy = r.centerY();
+  target.drawArc(toPx(cx), toPx(cy), toPx(radius), 200.0f, 340.0f, color, thickness);
+  target.drawArc(toPx(cx), toPx(cy), toPx(radius), 20.0f, 160.0f, color, thickness);
+  tinymd::drawLineThick(target, cx + radius, cy - 4, cx + radius, cy + 1, color, thickness);
+  tinymd::drawLineThick(target, cx - radius, cy + 4, cx - radius, cy - 1, color, thickness);
+}
+
+/// Circle with a filled half (Light / Dark theme).
+template <typename RGB_T>
+void drawThemeIcon(tinygpu::ISurface<RGB_T>& target, const tinymd::Bounds& r, RGB_T color,
+                   uint8_t thickness = 2) {
+  using tinymd::toPx;
+  const int32_t radius = r.w * 3 / 8;
+  const int32_t cx = r.centerX(), cy = r.centerY();
+  target.drawArc(toPx(cx), toPx(cy), toPx(radius), 0.0f, 360.0f, color, thickness);
+  for (int32_t dy = -radius; dy <= radius; ++dy) {
+    const int32_t half = static_cast<int32_t>(sqrtf(static_cast<float>(radius * radius - dy * dy)));
+    if (half > 0) target.fillRect(toPx(cx), toPx(cy + dy), toPx(half), 1, color);
+  }
 }
 
 }  // namespace tinytimegrapher

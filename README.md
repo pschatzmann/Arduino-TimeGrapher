@@ -11,11 +11,12 @@ This is the Arduino port of [Android-TimeGrapher](https://github.com/pschatzmann
 - **KPIs:** rate (s/day), beat error, amplitude, beat rate, tick/tock ratio, jitter and SNR.
 - **Charts:** the standard timegrapher chart, a rolling volume chart with the detection threshold, and KPI trends (1 min / 5 min / 30 min / session).
 - **Settings:** beat rate (auto or 14400 to 36000 bph), lift angle, analysis window, band-pass filter, automatic or manual gain, sensitivity, calibration offset, light/dark theme.
-- **Clock correction with NTP** for a precise rate.
-- **Menu:** Start / Stop and Shut down.
+- **Clock correction with NTP** for a precise rate, with a WiFi page to select the network.
+- **Menu:** Start / Stop, Reset session, WiFi, Light / Dark theme and Shut down.
 - **Demo mode:** measures a simulated watch instead of the microphone.
 - **Layered:** use only the measurement engine (any audio source, no display), or the complete touch GUI.
-- **Desktop build** with CMake: the GUI in an SDL2 window and the unit tests.
+- **Extensible GUI:** each tab is its own class; add your own tabs with `addPage()` (see [Arduino API](https://github.com/pschatzmann/TinyTimeGrapher/wiki/Arduino-API#own-pages)).
+- **Desktop build** with CMake: the GUI in an SDL2 window, the unit tests and a screenshot test of every page.
 
 ## Documentation
 
@@ -39,7 +40,7 @@ I recommend to use git because you can easily update to the latest version just 
 Install the dependencies the same way:
 
 - [arduino-audio-tools](https://github.com/pschatzmann/arduino-audio-tools)
-- [TinyMaterialDesign](https://github.com/pschatzmann/TinyMaterialDesign) and [TinyGPU](https://github.com/pschatzmann/TinyGPU)
+- [TinyMaterialDesign](https://github.com/pschatzmann/TinyMaterialDesign) (newer than v0.3.0: the current `main`) and [TinyGPU](https://github.com/pschatzmann/TinyGPU)
 - [arduino-audio-driver](https://github.com/pschatzmann/arduino-audio-driver): for the codec of the example board
 - [TinyNTP](https://github.com/pschatzmann/TinyNTP): optional, for the clock correction. It is licensed under the GPL v3.
 
